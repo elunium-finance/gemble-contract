@@ -3,7 +3,7 @@ pragma solidity 0.6.6;
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import '@openzeppelin/contracts/access/Ownable.sol';
 
-import "./EluniumToken.sol";
+import "./Elunium.sol";
 
 // Rock with Governance.
 contract Rock is ERC20('Rock', 'ROCK'), Ownable {
@@ -26,11 +26,11 @@ contract Rock is ERC20('Rock', 'ROCK'), Ownable {
     }
 
     // The Elunium TOKEN!
-    EluniumToken public elunium;
+    Elunium public elunium;
 
 
     constructor(
-        EluniumToken _elunium
+        Elunium _elunium
     ) public {
         elunium = _elunium;
     }

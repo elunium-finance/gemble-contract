@@ -2,7 +2,7 @@ pragma solidity 0.6.6;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
-import "./IGembleReferral.sol";
+import "./interfaces/IGembleReferral.sol";
 
 contract GembleReferral is IGembleReferral, Ownable {
     using SafeERC20 for IERC20;

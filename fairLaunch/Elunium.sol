@@ -5,13 +5,13 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 // EluniumToken with Governance.
-contract EluniumToken is ERC20("Elunium", "ELUNIUM"), Ownable {
+contract Elunium is ERC20("Elunium", "ELUNIUM"), Ownable {
   uint256 private constant CAP = 168000000e18;
   uint256 private _totalLock;
 
   uint256 public startReleaseBlock;
   uint256 public endReleaseBlock;
-  uint256 public constant MANUAL_MINT_LIMIT = 8000000e18;
+  uint256 public constant MANUAL_MINT_LIMIT = 200000e18;
   uint256 public manualMinted = 0;
 
   mapping(address => uint256) private _locks;
@@ -25,7 +25,7 @@ contract EluniumToken is ERC20("Elunium", "ELUNIUM"), Ownable {
     startReleaseBlock = _startReleaseBlock;
     endReleaseBlock = _endReleaseBlock;
 
-    // maunalMint 600k for seeding liquidity
+    // maunalMint 200k for seeding liquidity
     manualMint(msg.sender, 200000e18);
   }
 

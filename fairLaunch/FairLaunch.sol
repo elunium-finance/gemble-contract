@@ -4,9 +4,10 @@ import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 
-import "./EluniumToken.sol";
+import "./Elunium.sol";
 import "./Rock.sol";
 import "./interfaces/IFairLaunch.sol";
+import "./interfaces/IGembleReferral.sol";
 
 // FairLaunch is a smart contract for distributing Elunium by asking user to stake the ERC20-based token.
 contract FairLaunch is IFairLaunch, Ownable, ReentrancyGuard {
@@ -49,7 +50,7 @@ contract FairLaunch is IFairLaunch, Ownable, ReentrancyGuard {
   // The Gem TOKEN!
   IERC20 public gem;
   // The Elunium TOKEN!
-  EluniumToken public elunium;
+  Elunium public elunium;
   // The Rock TOKEN!
   Rock public rock;
   // Dev address.
@@ -66,6 +67,13 @@ contract FairLaunch is IFairLaunch, Ownable, ReentrancyGuard {
   uint256 public bonusLockUpBps;
   // 3 days
   uint256 public withdrawFeePeriod = 72 hours; 
+
+  // Gemble referral contract address.
+  IGembleReferral public gembleReferral;
+  // Referral commission rate in basis points: 5%.
+  uint16 public referralCommissionRate = 500;
+  // Max referral commission rate: 10%.
+  uint16 public constant MAXIMUM_REFERRAL_COMMISSION_RATE = 1000;
 
   // Max fees
   uint256 public constant MAX_WITHDRAW_FEE = 100; // 1%
@@ -84,10 +92,11 @@ contract FairLaunch is IFairLaunch, Ownable, ReentrancyGuard {
   event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
   event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
   event EmergencyWithdraw(address indexed user, uint256 indexed pid, uint256 amount);
+  event ReferralCommissionPaid(address indexed user, address indexed referrer, uint256 commissionAmount);
 
   constructor(
     IERC20 _gem,
-    EluniumToken _elunium,
+    Elunium _elunium,
     Rock _rock,
     address _devaddr,
     address _feeaddr,
@@ -283,12 +292,15 @@ contract FairLaunch is IFairLaunch, Ownable, ReentrancyGuard {
   }
 
   // Deposit Staking tokens to FairLaunchToken for Elunium allocation.
-  function deposit(address _for, uint256 _pid, uint256 _amount) external override nonReentrant {
+  function deposit(address _for, uint256 _pid, uint256 _amount, address _referrer) external override nonReentrant {
     require (_pid != 0, 'deposit Elunium by staking');
     PoolInfo storage pool = poolInfo[_pid];
     UserInfo storage user = userInfo[_pid][_for];
     if (user.fundedBy != address(0)) require(user.fundedBy == msg.sender, "bad sof");
     require(pool.stakeToken != address(0), "deposit: not accept deposit");
+    if (_amount > 0 && address(gembleReferral) != address(0) && _referrer != address(0) && _referrer != msg.sender) {
+      gembleReferral.recordReferral(msg.sender, _referrer);
+    }
     updatePool(_pid);
     if (user.amount > 0) _harvest(_for, _pid);
     if (user.fundedBy == address(0)) user.fundedBy = msg.sender;
@@ -361,21 +373,25 @@ contract FairLaunch is IFairLaunch, Ownable, ReentrancyGuard {
     require(pending <= elunium.balanceOf(address(rock)), "wtf not enough elunium");
     uint256 bonus = user.amount.mul(pool.accEluniumPerShareTilBonusEnd).div(1e12).sub(user.bonusDebt);
     safeEluniumTransfer(_to, pending);
+    payReferralCommission(_to, pending);
     elunium.lock(_to, bonus.mul(bonusLockUpBps).div(10000));
   }
 
   // Stake Elunium tokens to MasterChef
-  function enterStaking(uint256 _amount) public {
+  function enterStaking(uint256 _amount, address _referrer) public {
     PoolInfo storage pool = poolInfo[0];
     UserInfo storage user = userInfo[0][msg.sender];
     if (user.fundedBy != address(0)) require(user.fundedBy == msg.sender, "bad sof");
     require(pool.stakeToken != address(0), "deposit: not accept deposit");
+    if (_amount > 0 && address(gembleReferral) != address(0) && _referrer != address(0) && _referrer != msg.sender) {
+        gembleReferral.recordReferral(msg.sender, _referrer);
+    }
     updatePool(0);
     if (user.amount > 0) _harvest(msg.sender, 0);
     if (user.fundedBy == address(0)) user.fundedBy = msg.sender;
     if (_amount > 0) {
-        IERC20(pool.stakeToken).safeTransferFrom(address(msg.sender), address(this), _amount);
-        user.amount = user.amount.add(_amount);
+      IERC20(pool.stakeToken).safeTransferFrom(address(msg.sender), address(this), _amount);
+      user.amount = user.amount.add(_amount);
     }
     user.rewardDebt = user.amount.mul(pool.accEluniumPerShare).div(1e12);
     user.bonusDebt = user.amount.mul(pool.accEluniumPerShareTilBonusEnd).div(1e12);
@@ -426,10 +442,35 @@ contract FairLaunch is IFairLaunch, Ownable, ReentrancyGuard {
 
   function safeGemTransfer(address _to, uint256 _amount) internal {
     uint256 gemBal = gem.balanceOf(address(gemBank));
-        if (_amount > gemBal) {
-            gem.safeTransferFrom(address(gemBank), _to, gemBal);
-        } else {
-            gem.safeTransferFrom(address(gemBank), _to, _amount);
+    if (_amount > gemBal) {
+        gem.safeTransferFrom(address(gemBank), _to, gemBal);
+    } else {
+        gem.safeTransferFrom(address(gemBank), _to, _amount);
+    }
+  }
+
+  // Update the genble referral contract address by the owner
+  function setGembleReferral(IGembleReferral _gembleReferral) public onlyOwner {
+    gembleReferral = _gembleReferral;
+  }
+
+  // Update referral commission rate by the owner
+  function setReferralCommissionRate(uint16 _referralCommissionRate) public onlyOwner {
+    require(_referralCommissionRate <= MAXIMUM_REFERRAL_COMMISSION_RATE, "setReferralCommissionRate: invalid referral commission rate basis points");
+    referralCommissionRate = _referralCommissionRate;
+  }
+
+  // Pay referral commission to the referrer who referred this user.
+  function payReferralCommission(address _user, uint256 _pending) internal {
+    if (address(gembleReferral) != address(0) && referralCommissionRate > 0) {
+        address referrer = gembleReferral.getReferrer(_user);
+        uint256 commissionAmount = _pending.mul(referralCommissionRate).div(10000);
+
+        if (referrer != address(0) && commissionAmount > 0) {
+            elunium.mint(referrer, commissionAmount);
+            gembleReferral.recordReferralCommission(referrer, commissionAmount);
+            emit ReferralCommissionPaid(_user, referrer, commissionAmount);
         }
+    }
   }
 }
